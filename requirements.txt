@@ -1,0 +1,7 @@
+fastapi
+uvicorn[standard]
+yt-dlp
+demucs
+numpy
+torch
+torchaudio
