@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Karaoke Maker</title>
+<style>
+  :root { color-scheme: light dark; }
+  body {
+    font-family: system-ui, sans-serif;
+    max-width: 640px;
+    margin: 3rem auto;
+    padding: 0 1rem;
+    line-height: 1.5;
+  }
+  h1 { font-size: 1.6rem; }
+  form { display: flex; gap: 0.5rem; margin: 1.5rem 0; }
+  input[type="url"] {
+    flex: 1;
+    padding: 0.6rem 0.8rem;
+    font-size: 1rem;
+    border: 1px solid #8884;
+    border-radius: 8px;
+  }
+  button {
+    padding: 0.6rem 1.2rem;
+    font-size: 1rem;
+    border: none;
+    border-radius: 8px;
+    background: #6d28d9;
+    color: white;
+    cursor: pointer;
+  }
+  button:disabled { opacity: 0.5; cursor: default; }
+  #status { min-height: 1.5em; margin: 1rem 0; }
+  progress { width: 100%; height: 10px; }
+  .error { color: #dc2626; }
+  .tracks { display: none; }
+  .tracks.ready { display: block; }
+  .track { margin: 1.2rem 0; }
+  .track h2 { font-size: 1rem; margin: 0 0 0.4rem; }
+  audio { width: 100%; }
+  a.download { font-size: 0.9rem; }
+</style>
+</head>
+<body>
+<h1>🎤 Karaoke Maker</h1>
+<p>Paste a YouTube link — get an instrumental (karaoke) track and an isolated vocals track.</p>
+
+<form id="form">
+  <input id="url" type="url" placeholder="https://www.youtube.com/watch?v=..." required>
+  <button id="go" type="submit">Make karaoke</button>
+</form>
+
+<div id="status"></div>
+<progress id="bar" value="0" max="1" hidden></progress>
+
+<div class="tracks" id="tracks">
+  <h2 id="title"></h2>
+  <div class="track">
+    <h2>Karaoke (no vocals)</h2>
+    <audio id="karaoke" controls></audio>
+    <a class="download" id="karaoke-dl" download>Download</a>
+  </div>
+  <div class="track">
+    <h2>Vocals only</h2>
+    <audio id="vocals" controls></audio>
+    <a class="download" id="vocals-dl" download>Download</a>
+  </div>
+  <div class="track">
+    <h2>Original song</h2>
+    <audio id="original" controls></audio>
+    <a class="download" id="original-dl" download>Download</a>
+  </div>
+</div>
+
+<script>
+const form = document.getElementById("form");
+const go = document.getElementById("go");
+const statusEl = document.getElementById("status");
+const bar = document.getElementById("bar");
+const tracks = document.getElementById("tracks");
+
+const STAGE_LABELS = {
+  queued: "Waiting in queue…",
+  downloading: "Downloading audio…",
+  separating: "Separating vocals (this takes a few minutes)…",
+  encoding: "Encoding MP3s…",
+};
+
+let poller = null;
+
+form.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  clearInterval(poller);
+  tracks.classList.remove("ready");
+  go.disabled = true;
+  statusEl.textContent = "Submitting…";
+  statusEl.classList.remove("error");
+
+  try {
+    const res = await fetch("/api/jobs", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url: document.getElementById("url").value }),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    const { id } = await res.json();
+    poller = setInterval(() => poll(id), 1500);
+  } catch (err) {
+    fail(err.message);
+  }
+});
+
+async function poll(id) {
+  let job;
+  try {
+    const res = await fetch(`/api/jobs/${id}`);
+    if (!res.ok) throw new Error(await res.text());
+    job = await res.json();
+  } catch (err) {
+    clearInterval(poller);
+    fail(err.message);
+    return;
+  }
+
+  if (job.stage === "error") {
+    clearInterval(poller);
+    fail(job.error || "Processing failed.");
+  } else if (job.stage === "done") {
+    clearInterval(poller);
+    finish(id, job.title, job.sizes || {});
+  } else {
+    const label = STAGE_LABELS[job.stage] || job.stage;
+    if (job.progress != null) {
+      statusEl.textContent = `${label} ${Math.round(job.progress * 100)}%`;
+      bar.hidden = false;
+      bar.value = job.progress;
+    } else {
+      statusEl.textContent = label;
+      bar.hidden = true;
+    }
+  }
+}
+
+function finish(id, title, sizes) {
+  go.disabled = false;
+  bar.hidden = true;
+  statusEl.textContent = "Done!";
+  document.getElementById("title").textContent = title || "";
+  for (const track of ["karaoke", "vocals", "original"]) {
+    const src = `/api/jobs/${id}/${track}.mp3`;
+    document.getElementById(track).src = src;
+    const link = document.getElementById(`${track}-dl`);
+    link.href = src;
+    link.textContent = sizes[track] ? `Download (${formatSize(sizes[track])})` : "Download";
+  }
+  tracks.classList.add("ready");
+}
+
+function formatSize(bytes) {
+  return bytes >= 1024 * 1024
+    ? `${(bytes / 1024 / 1024).toFixed(1)} MB`
+    : `${Math.round(bytes / 1024)} KB`;
+}
+
+function fail(msg) {
+  go.disabled = false;
+  bar.hidden = true;
+  statusEl.textContent = msg;
+  statusEl.classList.add("error");
+}
+</script>
+</body>
+</html>
