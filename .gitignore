@@ -1,0 +1,15 @@
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+
+# App output (downloaded audio + generated mp3s)
+data/
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+
+# Local env/secrets
+.env
