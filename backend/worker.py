@@ -11,6 +11,8 @@ import yt_dlp
 
 DEMUCS_MODEL = "htdemucs"
 
+MP3_ARGS = ["-codec:a", "libmp3lame", "-b:a", "320k"]
+
 
 def _run_checked(cmd: list[str]) -> None:
     """Run a command; on failure raise with the stderr tail so the job error is diagnosable."""
@@ -82,9 +84,59 @@ def separate(audio: Path, job_dir: Path, on_progress) -> tuple[Path, Path]:
 
 
 def encode_mp3(wav: Path, mp3: Path) -> None:
-    _run_checked(
-        ["ffmpeg", "-y", "-i", str(wav), "-codec:a", "libmp3lame", "-b:a", "320k", str(mp3)]
-    )
+    _run_checked(["ffmpeg", "-y", "-i", str(wav), *MP3_ARGS, str(mp3)])
+
+
+def make_mix(clips: list[dict], out_mp3: Path, eq: dict | None = None, enhance: bool = False) -> None:
+    """Cut and layer audio clips into a single mp3.
+
+    Each clip: {"path": Path, "start": float|None, "end": float|None,
+    "offset": float, "gain": float}. start/end cut the source; offset places
+    the cut on the output timeline. Overlapping clips blend together,
+    back-to-back offsets form a medley.
+
+    eq: optional master EQ, {"bass": dB, "mid": dB, "treble": dB}.
+    enhance: master clarity chain — rumble cut, presence lift, loudness
+    normalization (also prevents clipping where loud clips overlap).
+    """
+    cmd = ["ffmpeg", "-y"]
+    filters = []
+    for i, clip in enumerate(clips):
+        cmd += ["-i", str(clip["path"])]
+        steps = []
+        if clip.get("start") is not None or clip.get("end") is not None:
+            args = []
+            if clip.get("start") is not None:
+                args.append(f"start={clip['start']}")
+            if clip.get("end") is not None:
+                args.append(f"end={clip['end']}")
+            steps += ["atrim=" + ":".join(args), "asetpts=PTS-STARTPTS"]
+        if clip.get("offset"):
+            steps.append(f"adelay={int(clip['offset'] * 1000)}:all=1")
+        if clip.get("gain", 1) != 1:
+            steps.append(f"volume={clip['gain']}")
+        steps = steps or ["anull"]
+        filters.append(f"[{i}:a]" + ",".join(steps) + f"[c{i}]")
+    master = []
+    if eq:
+        if eq.get("bass"):
+            master.append(f"bass=g={eq['bass']}")
+        if eq.get("mid"):
+            master.append(f"equalizer=f=1000:t=q:w=1.0:g={eq['mid']}")
+        if eq.get("treble"):
+            master.append(f"treble=g={eq['treble']}")
+    if enhance:
+        # rumble cut, vocal presence, broadcast loudness; loudnorm outputs 192kHz,
+        # so resample back down for the mp3 encoder.
+        master += ["highpass=f=60", "equalizer=f=3200:t=q:w=1.0:g=2",
+                   "loudnorm=I=-14:TP=-1.5:LRA=11", "aresample=44100"]
+    joined = "".join(f"[c{i}]" for i in range(len(clips)))
+    mix_out = "[mixed]" if master else "[out]"
+    filters.append(f"{joined}amix=inputs={len(clips)}:duration=longest:normalize=0{mix_out}")
+    if master:
+        filters.append("[mixed]" + ",".join(master) + "[out]")
+    cmd += ["-filter_complex", ";".join(filters), "-map", "[out]", *MP3_ARGS, str(out_mp3)]
+    _run_checked(cmd)
 
 
 def run_pipeline(url: str, job_dir: Path, set_status) -> dict:
@@ -113,3 +165,15 @@ def run_pipeline(url: str, job_dir: Path, set_status) -> dict:
     audio.unlink(missing_ok=True)
 
     return {"title": title, "karaoke": karaoke_mp3, "vocals": vocals_mp3, "original": original_mp3}
+
+
+def probe_duration(path: Path) -> float:
+    """Audio duration in seconds via ffprobe (0.0 if unreadable)."""
+    proc = subprocess.run(
+        ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", str(path)],
+        capture_output=True, text=True,
+    )
+    try:
+        return round(float(proc.stdout.strip()), 2)
+    except ValueError:
+        return 0.0

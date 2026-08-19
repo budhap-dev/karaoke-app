@@ -5,3 +5,4 @@ demucs
 numpy
 torch
 torchaudio
+python-multipart
