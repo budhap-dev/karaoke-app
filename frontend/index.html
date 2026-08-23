@@ -92,21 +92,59 @@
   .upload-label input { display: none; }
 
   /* ---- timeline ---- */
+  .zoom { display: flex; gap: 0.4rem; align-items: center; margin: 1rem 0 0.4rem; flex-wrap: wrap; }
+  .project { display: flex; gap: 0.4rem; align-items: center; margin: 0.8rem 0; flex-wrap: wrap; }
+  .project input { width: 11rem; padding: 0.25rem 0.5rem; font-size: 0.85rem; }
   #timeline { display: flex; margin: 1rem 0; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
-  #lane-heads { flex: 0 0 13rem; min-width: 0; max-width: 13rem; overflow: hidden; border-right: 1px solid var(--border); }
+  #lane-heads { flex: 0 0 19rem; min-width: 0; max-width: 19rem; overflow: hidden; border-right: 1px solid var(--border); }
   #lane-scroll { flex: 1; overflow-x: auto; }
   .ruler-spacer, #ruler { height: 1.6rem; box-sizing: border-box; border-bottom: 1px solid var(--border); }
   #ruler { position: relative; font-size: 0.7rem; opacity: 0.8; }
   .tick { position: absolute; top: 0; bottom: 0; border-left: 1px solid var(--border); padding-left: 3px; white-space: nowrap; }
   .lane-head, .lane {
-    height: 3.6rem;
+    height: 5.6rem;
     box-sizing: border-box;
     border-bottom: 1px solid var(--border-soft);
   }
-  .lane-head { display: flex; align-items: center; gap: 0.3rem; padding: 0 0.5rem; font-size: 0.8rem; }
-  .lane-head .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .lane-head input.gain { width: 3.2rem; padding: 0.2rem 0.3rem; font-size: 0.8rem; }
+  .lane-head { display: flex; flex-direction: column; justify-content: center; gap: 0.2rem; padding: 0 0.5rem; font-size: 0.8rem; }
+  .lane-head .row { display: flex; align-items: center; gap: 0.3rem; }
+  .lane-head input.name {
+    flex: 1; min-width: 0;
+    border: 1px solid transparent; background: transparent;
+    padding: 0.1rem 0.25rem; font-size: 0.8rem; border-radius: 4px;
+    text-overflow: ellipsis;
+  }
+  .lane-head input.name:hover { border-color: var(--border-soft); }
+  .lane-head input.name:focus { border-color: var(--accent); background: var(--bg); outline: none; }
+  .lane-head input.color {
+    width: 1.25rem; height: 1.25rem; padding: 0; border: none; background: none;
+    border-radius: 50%; cursor: pointer; flex: 0 0 auto;
+  }
+  .lane-head input.color::-webkit-color-swatch-wrapper { padding: 0; }
+  .lane-head input.color::-webkit-color-swatch { border: none; border-radius: 50%; }
+  .lane-head .mv { background: none; border: none; color: var(--text); opacity: 0.55; cursor: pointer; padding: 0 0.1rem; font-size: 0.7rem; }
+  .lane-head .mv:hover { opacity: 1; }
+  .lane-head .mv:disabled { opacity: 0.15; cursor: default; }
+  .lane-head .ctl label { display: flex; align-items: center; gap: 0.2rem; font-size: 0.72rem; opacity: 0.85; cursor: help; }
+  .lane-head .ctl input { width: 2.7rem; padding: 0.15rem 0.25rem; font-size: 0.75rem; }
+  .lane-head .ctl input.time { width: 3.4rem; }
+  .lane-head .ctl input.bad { border-color: #dc2626; }
   .lane-head .remove { background: none; border: none; color: #dc2626; font-size: 1rem; padding: 0.1rem; cursor: pointer; }
+  .lane-head .play { background: none; border: none; color: var(--accent); font-size: 0.95rem; padding: 0.1rem 0.2rem; cursor: pointer; }
+  .playhead {
+    position: absolute; top: 0; bottom: 0; width: 2px;
+    background: var(--text);
+    z-index: 2;
+    cursor: ew-resize;
+    touch-action: none;
+  }
+  .playhead::before {  /* knob */
+    content: ""; position: absolute; top: -1px; left: -5px;
+    border: 6px solid transparent; border-top: 8px solid var(--text); border-bottom: 0;
+  }
+  .playhead::after {   /* wide grab area */
+    content: ""; position: absolute; top: 0; bottom: 0; left: -7px; right: -7px;
+  }
   .lane { position: relative; background-image: linear-gradient(90deg, var(--border-soft) 1px, transparent 1px); background-size: 45px 100%; }
   .block {
     position: absolute;
@@ -128,6 +166,7 @@
   .block .body { flex: 1; overflow: hidden; padding: 0.15rem 0.2rem; pointer-events: none; white-space: nowrap; }
   .block .place { font-weight: 600; }
   .block .cut { opacity: 0.85; }
+  .block .fx { opacity: 0.85; font-style: italic; }
   .block .handle {
     width: 9px;
     align-self: stretch;
@@ -246,11 +285,30 @@
     Upload MP3s — each one lands on the timeline as a clip.
     <strong>Drag a block</strong> to place it in time, <strong>drag its edges</strong> to cut it.
     Overlapping blocks play together; back-to-back blocks make a medley.
+    Press <strong>▶</strong> on a lane to hear just that clip (its cut range) before mixing.
   </p>
+  <audio id="preview" preload="none"></audio>
   <div class="sources">
     <label class="upload-label">⬆ Upload MP3s<input id="upload" type="file" accept="audio/*" multiple></label>
   </div>
+  <div class="project">
+    <span class="hint">Project</span>
+    <input id="project-name" type="text" placeholder="name" list="project-names">
+    <datalist id="project-names"></datalist>
+    <button class="mode-btn" id="project-save" title="Save this arrangement on the server under this name">Save</button>
+    <button class="mode-btn" id="project-load" title="Load the named arrangement">Load</button>
+    <button class="mode-btn" id="project-export" title="Download this arrangement as a .json file">Export</button>
+    <button class="mode-btn" id="project-import" title="Paste a project JSON to import it">Import</button>
+    <span class="hint" id="project-status"></span>
+  </div>
   <div id="library-empty" class="hint">Nothing on the timeline yet — upload one or more MP3s to start cutting.</div>
+  <div id="zoom" class="zoom hidden">
+    <span class="hint">Zoom</span>
+    <button class="mode-btn" id="zoom-out" title="Zoom out (or Ctrl/⌘ + scroll)">−</button>
+    <button class="mode-btn" id="zoom-in" title="Zoom in (or Ctrl/⌘ + scroll)">+</button>
+    <button class="mode-btn" id="zoom-fit" title="Fit whole mix">Fit</button>
+    <span class="hint">Type exact times in the From / To / At boxes, or drag the blocks.</span>
+  </div>
   <div id="timeline" class="hidden">
     <div id="lane-heads"><div class="ruler-spacer"></div></div>
     <div id="lane-scroll">
@@ -291,17 +349,43 @@ const STAGE_LABELS = {
   mixing: "Mixing…",
 };
 
-const PPS = 3; // timeline pixels per second
+let pps = 3; // timeline pixels per second (zoom)
 
 let library = [];
 let clips = [];
 let nextClipId = 1;
 
+const PALETTE = ["#6d28d9", "#0e7490", "#c2410c", "#15803d", "#be185d", "#4338ca", "#a16207", "#0f766e"];
+
+// black or white text, whichever reads better on the given hex colour
+function textOn(hex) {
+  const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255);
+  const lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  return lum > 0.55 ? "#111" : "#fff";
+}
+
 // ---------- helpers ----------
 
 function fmt(seconds) {
+  // n:nn.n everywhere (1 decimal place)
+  const s = Math.max(0, Math.round(seconds * 10) / 10);
+  const m = Math.floor(s / 60);
+  return `${m}:${(s - m * 60).toFixed(1).padStart(4, "0")}`;
+}
+
+function fmtTick(seconds) {
+  // ruler labels are whole seconds — keep them compact
   const s = Math.max(0, Math.round(seconds));
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+}
+
+function parseTime(str) {
+  // accepts "83", "83.5", "1:23", "1:23.5", "1:02:03"; null for empty, NaN for garbage
+  const s = String(str).trim();
+  if (!s) return null;
+  const parts = s.split(":").map(Number);
+  if (parts.some(Number.isNaN) || parts.length > 3) return NaN;
+  return parts.reduce((acc, p) => acc * 60 + p, 0);
 }
 
 function formatSize(bytes) {
@@ -444,13 +528,37 @@ function addClip(job, track) {
     end: info.duration,
     offset: 0,
     gain: 1,
+    tempo: 1,
+    pitch: 0,
+    color: PALETTE[(nextClipId - 2) % PALETTE.length],
   });
   renderTimeline();
 }
 
+const clipLength = (c) => (c.end - c.start) / c.tempo; // seconds on the output timeline
+
 function mixLength() {
-  return clips.length ? Math.max(...clips.map((c) => c.offset + (c.end - c.start))) : 0;
+  return clips.length ? Math.max(...clips.map((c) => c.offset + clipLength(c))) : 0;
 }
+
+function rulerStep() {
+  // pick the smallest step that keeps ruler labels >= ~70px apart at the current zoom
+  for (const s of [1, 2, 5, 10, 15, 30, 60, 120, 300, 600]) if (s * pps >= 70) return s;
+  return 600;
+}
+
+function setZoom(next) {
+  pps = clamp(next, 0.3, 60);
+  renderTimeline();
+}
+$("zoom-in").addEventListener("click", () => setZoom(pps * 1.5));
+$("zoom-out").addEventListener("click", () => setZoom(pps / 1.5));
+$("zoom-fit").addEventListener("click", () => setZoom($("lane-scroll").clientWidth / timelineSpan()));
+$("lane-scroll").addEventListener("wheel", (e) => {
+  if (!(e.ctrlKey || e.metaKey)) return;
+  e.preventDefault();
+  setZoom(pps * (e.deltaY < 0 ? 1.15 : 1 / 1.15));
+}, { passive: false });
 
 function timelineSpan() {
   return Math.max(60, mixLength()) + 30;
@@ -458,12 +566,14 @@ function timelineSpan() {
 
 function updateTotal() {
   $("mix-total").textContent = clips.length ? `Σ ${fmt(mixLength())}` : "";
+  autosave();
 }
 
 function renderTimeline() {
   const has = clips.length > 0;
   $("library-empty").classList.toggle("hidden", has);
   $("timeline").classList.toggle("hidden", !has);
+  $("zoom").classList.toggle("hidden", !has);
   $("master").classList.toggle("hidden", !has);
   $("mix-controls").classList.toggle("hidden", !has);
   const heads = $("lane-heads");
@@ -474,34 +584,108 @@ function renderTimeline() {
 
   updateTotal();
   const span = timelineSpan();
-  const width = span * PPS;
+  const width = span * pps;
 
   // ruler
   const ruler = $("ruler");
   ruler.innerHTML = "";
   ruler.style.width = `${width}px`;
-  const step = span > 600 ? 60 : span > 240 ? 30 : 15;
+  const step = rulerStep();
   for (let t = 0; t <= span; t += step) {
     const tick = document.createElement("div");
     tick.className = "tick";
-    tick.style.left = `${t * PPS}px`;
-    tick.textContent = fmt(t);
+    tick.style.left = `${t * pps}px`;
+    tick.textContent = fmtTick(t);
     ruler.appendChild(tick);
   }
 
   for (const clip of clips) {
+    let block; // created below; head controls reference it lazily
     // left: lane head
     const head = document.createElement("div");
     head.className = "lane-head";
+    head.dataset.clip = clip.id;
     head.innerHTML = `
-      <span class="name" title="${clip.title} — ${clip.track}">${clip.title} — ${clip.track}</span>
-      <input class="gain" type="number" min="0" max="10" step="0.1" title="Volume">
-      <button class="remove" title="Remove">✕</button>`;
+      <div class="row">
+        <button class="play" title="Preview this clip">▶</button>
+        <input class="color" type="color" title="Track colour">
+        <input class="name" type="text" title="Track name — click to rename" spellcheck="false">
+        <button class="mv up" title="Move up">▲</button>
+        <button class="mv down" title="Move down">▼</button>
+        <button class="remove" title="Remove">✕</button>
+      </div>
+      <div class="row ctl">
+        <label title="Cut from — where in the source the clip starts (m:ss or seconds)">From<input class="time t-start" type="text"></label>
+        <label title="Cut to — where in the source the clip ends (m:ss or seconds)">To<input class="time t-end" type="text"></label>
+        <label title="Place at — where on the mix timeline the clip starts (m:ss or seconds)">At<input class="time t-offset" type="text"></label>
+      </div>
+      <div class="row ctl">
+        <label title="Volume: 1 = original, 0.5 = half, 2 = double">Vol<input class="gain" type="number" min="0" max="10" step="0.1"></label>
+        <label title="Speed: 0.5 = half speed, 2 = double (pitch preserved)">Speed<input class="tempo" type="number" min="0.5" max="2" step="0.05"></label>
+        <label title="Pitch in semitones, −12…+12 (speed preserved). Not audible in preview — applied when mixing.">Pitch<input class="pitch" type="number" min="-12" max="12" step="1"></label>
+      </div>`;
+    for (const [cls, apply] of [
+      [".t-start", (v) => { clip.start = clamp(v, 0, clip.end - 0.5); }],
+      [".t-end", (v) => { clip.end = clamp(v, clip.start + 0.5, clip.dur); }],
+      [".t-offset", (v) => { clip.offset = Math.max(0, v); }],
+    ]) {
+      const input = head.querySelector(cls);
+      input.addEventListener("change", () => {
+        const v = parseTime(input.value);
+        input.classList.toggle("bad", Number.isNaN(v) || v === null);
+        if (v !== null && !Number.isNaN(v)) apply(round1(v));
+        positionBlock(block, clip);
+        updateTotal();
+        renderTimeline();
+      });
+    }
+    const idx = clips.indexOf(clip);
+    head.querySelector(".name").value = clip.title;
+    head.querySelector(".name").addEventListener("change", async (e) => {
+      const title = e.target.value.trim();
+      if (!title) { e.target.value = clip.title; return; }
+      clip.title = title;
+      positionBlock(block, clip);
+      autosave();
+      // persist so the library/download filename use the new name too
+      try {
+        await fetch(`/api/jobs/${clip.job}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ title }),
+        });
+      } catch { /* local rename still applies */ }
+    });
+    head.querySelector(".color").value = clip.color;
+    head.querySelector(".color").addEventListener("input", (e) => {
+      clip.color = e.target.value;
+      positionBlock(block, clip);
+      autosave();
+    });
+    head.querySelector(".up").disabled = idx === 0;
+    head.querySelector(".down").disabled = idx === clips.length - 1;
+    head.querySelector(".up").addEventListener("click", () => moveClip(clip, -1));
+    head.querySelector(".down").addEventListener("click", () => moveClip(clip, 1));
     head.querySelector(".gain").value = clip.gain;
+    head.querySelector(".tempo").value = clip.tempo;
+    head.querySelector(".pitch").value = clip.pitch;
     head.querySelector(".gain").addEventListener("input", (e) => {
       clip.gain = Number(e.target.value) || 1;
+      autosave();
     });
+    head.querySelector(".tempo").addEventListener("input", (e) => {
+      clip.tempo = clamp(Number(e.target.value) || 1, 0.5, 2);
+      if (previewing === clip.id) preview.playbackRate = clip.tempo;
+      positionBlock(block, clip); // tempo changes how long the clip runs
+      updateTotal();
+    });
+    head.querySelector(".pitch").addEventListener("input", (e) => {
+      clip.pitch = clamp(Math.round(Number(e.target.value) || 0), -12, 12);
+      autosave();
+    });
+    head.querySelector(".play").addEventListener("click", () => togglePreview(clip));
     head.querySelector(".remove").addEventListener("click", () => {
+      if (previewing === clip.id) stopPreview();
       clips = clips.filter((c) => c.id !== clip.id);
       renderTimeline();
     });
@@ -510,28 +694,144 @@ function renderTimeline() {
     // right: lane with draggable block
     const lane = document.createElement("div");
     lane.className = "lane";
+    lane.dataset.clip = clip.id;
     lane.style.width = `${width}px`;
-    const block = document.createElement("div");
+    lane.style.backgroundSize = `${step * pps}px 100%`;
+    const playhead = document.createElement("div");
+    playhead.className = "playhead hidden";
+    lane.appendChild(playhead);
+    attachScrub(playhead, lane, clip);
+    block = document.createElement("div");
     block.className = "block";
     block.innerHTML = `
       <div class="handle left"></div>
-      <div class="body"><div class="place"></div><div class="cut"></div></div>
+      <div class="body"><div class="place"></div><div class="cut"></div><div class="fx"></div></div>
       <div class="handle right"></div>`;
     lane.appendChild(block);
     lanes.appendChild(lane);
     positionBlock(block, clip);
     attachDrag(block, clip);
   }
+  refreshPreviewUI();
+  autosave();
+}
+
+// ---------- clip preview ----------
+
+const preview = $("preview");
+let previewing = null; // clip id currently playing
+
+function togglePreview(clip) {
+  if (previewing === clip.id) {
+    // Same clip: pause keeps its place; ▶ resumes (or restarts if the cut moved past it).
+    if (!preview.paused) {
+      preview.pause();
+    } else {
+      if (preview.currentTime < clip.start || preview.currentTime >= clip.end) {
+        preview.currentTime = clip.start;
+      }
+      preview.volume = Math.min(1, clip.gain);
+      preview.playbackRate = clip.tempo;
+      preview.play().catch(stopPreview);
+    }
+    refreshPreviewUI();
+    return;
+  }
+  stopPreview();
+  previewing = clip.id;
+  const src = new URL(`/api/jobs/${clip.job}/${clip.track}.mp3`, location).href;
+  const seekAndPlay = () => {
+    preview.currentTime = clip.start;
+    preview.volume = Math.min(1, clip.gain);
+    preview.playbackRate = clip.tempo;
+    preview.play().catch(stopPreview);
+  };
+  if (preview.src !== src) {
+    preview.src = src;
+    preview.addEventListener("loadedmetadata", seekAndPlay, { once: true });
+  } else {
+    seekAndPlay();
+  }
+  refreshPreviewUI();
+}
+
+function stopPreview() {
+  preview.pause();
+  previewing = null;
+  refreshPreviewUI();
+}
+
+preview.addEventListener("timeupdate", () => {
+  const clip = clips.find((c) => c.id === previewing);
+  if (!clip) return;
+  if (preview.currentTime >= clip.end) return stopPreview();
+  const ph = document.querySelector(`.lane[data-clip="${clip.id}"] .playhead`);
+  if (ph) ph.style.left = `${(clip.offset + (preview.currentTime - clip.start) / clip.tempo) * pps}px`;
+});
+preview.addEventListener("ended", stopPreview);
+preview.addEventListener("pause", refreshPreviewUI);
+preview.addEventListener("play", refreshPreviewUI);
+
+function attachScrub(playhead, lane, clip) {
+  playhead.addEventListener("pointerdown", (e) => {
+    if (previewing !== clip.id) return;
+    e.preventDefault();
+    e.stopPropagation();
+    playhead.setPointerCapture(e.pointerId);
+    const seek = (ev) => {
+      const x = ev.clientX - lane.getBoundingClientRect().left;
+      const time = clamp((x / pps - clip.offset) * clip.tempo + clip.start, clip.start, clip.end - 0.05);
+      preview.currentTime = time;
+      playhead.style.left = `${(clip.offset + (time - clip.start) / clip.tempo) * pps}px`;
+    };
+    seek(e);
+    const onUp = () => {
+      playhead.removeEventListener("pointermove", seek);
+      playhead.removeEventListener("pointerup", onUp);
+    };
+    playhead.addEventListener("pointermove", seek);
+    playhead.addEventListener("pointerup", onUp);
+  });
+}
+
+function refreshPreviewUI() {
+  document.querySelectorAll(".lane-head").forEach((h) => {
+    const active = Number(h.dataset.clip) === previewing && !preview.paused;
+    h.querySelector(".play").textContent = active ? "⏸" : "▶";
+  });
+  document.querySelectorAll(".lane .playhead").forEach((ph) => {
+    ph.classList.toggle("hidden", Number(ph.parentElement.dataset.clip) !== previewing);
+  });
+}
+
+function moveClip(clip, dir) {
+  const i = clips.indexOf(clip);
+  const j = i + dir;
+  if (j < 0 || j >= clips.length) return;
+  [clips[i], clips[j]] = [clips[j], clips[i]];
+  renderTimeline();
 }
 
 function positionBlock(block, clip) {
-  const len = clip.end - clip.start;
-  block.style.left = `${clip.offset * PPS}px`;
-  block.style.width = `${Math.max(len * PPS, 24)}px`;
+  const len = clipLength(clip);
+  block.style.background = clip.color;
+  block.style.color = textOn(clip.color);
+  block.style.left = `${clip.offset * pps}px`;
+  block.style.width = `${Math.max(len * pps, 24)}px`;
   block.querySelector(".place").textContent = `▶ ${fmt(clip.offset)}–${fmt(clip.offset + len)}`;
+  const fx = [clip.tempo !== 1 && `speed ${clip.tempo}×`, clip.pitch && `pitch ${clip.pitch > 0 ? "+" : ""}${clip.pitch}`].filter(Boolean);
   block.querySelector(".cut").textContent = `cut ${fmt(clip.start)}–${fmt(clip.end)}`;
+  block.querySelector(".fx").textContent = fx.join(" · ");
   block.title =
     `Plays ${fmt(clip.offset)}–${fmt(clip.offset + len)} · cut ${fmt(clip.start)}–${fmt(clip.end)} of ${clip.title}`;
+  // keep the exact-time boxes in sync with drags (don't clobber one being typed in)
+  const head = document.querySelector(`.lane-head[data-clip="${clip.id}"]`);
+  if (head) {
+    for (const [cls, val] of [[".t-start", clip.start], [".t-end", clip.end], [".t-offset", clip.offset]]) {
+      const input = head.querySelector(cls);
+      if (input && document.activeElement !== input) { input.value = fmt(val); input.classList.remove("bad"); }
+    }
+  }
 }
 
 function attachDrag(block, clip) {
@@ -544,7 +844,7 @@ function attachDrag(block, clip) {
     const { start, end, offset } = clip;
 
     const onMove = (ev) => {
-      const dx = (ev.clientX - x0) / PPS;
+      const dx = (ev.clientX - x0) / pps;
       if (mode === "move") {
         clip.offset = Math.max(0, round1(offset + dx));
       } else if (mode === "left") {
@@ -577,8 +877,11 @@ for (const band of ["bass", "mid", "treble"]) {
   $(`eq-${band}`).addEventListener("input", (e) => {
     const v = Number(e.target.value);
     $(`eq-${band}-v`).textContent = `${v > 0 ? "+" : ""}${v} dB`;
+    autosave();
   });
 }
+$("enhance").addEventListener("change", autosave);
+$("mix-title").addEventListener("input", autosave);
 
 function masterSettings() {
   const eq = {
@@ -592,12 +895,133 @@ function masterSettings() {
   };
 }
 
+// ---------- projects: save / load / autosave ----------
+
+const AUTOSAVE_KEY = "km-autosave";
+
+function serialize() {
+  return {
+    version: 1,
+    clips: clips.map(({ id, ...c }) => c),
+    mixTitle: $("mix-title").value,
+    master: masterSettings(),
+    enhance: $("enhance").checked,
+    pps,
+  };
+}
+
+async function restore(state) {
+  await loadLibrary();
+  const restored = [];
+  const dropped = [];
+  for (const c of state.clips || []) {
+    const info = sourceInfo(c.job, c.track);
+    if (!info) { dropped.push(c.title || c.job); continue; }
+    restored.push({
+      id: nextClipId++,
+      job: c.job, track: c.track,
+      title: c.title || info.title,
+      dur: info.duration,
+      start: clamp(Number(c.start) || 0, 0, info.duration),
+      end: clamp(Number(c.end) || info.duration, 0, info.duration),
+      offset: Math.max(0, Number(c.offset) || 0),
+      gain: Number(c.gain) || 1,
+      tempo: clamp(Number(c.tempo) || 1, 0.5, 2),
+      pitch: clamp(Number(c.pitch) || 0, -12, 12),
+      color: c.color || PALETTE[(nextClipId - 2) % PALETTE.length],
+    });
+  }
+  clips = restored;
+  $("mix-title").value = state.mixTitle || "";
+  const eq = (state.master && state.master.eq) || {};
+  for (const band of ["bass", "mid", "treble"]) {
+    $(`eq-${band}`).value = eq[band] || 0;
+    $(`eq-${band}`).dispatchEvent(new Event("input"));
+  }
+  $("enhance").checked = Boolean(state.enhance || (state.master && state.master.enhance));
+  if (state.pps) pps = clamp(Number(state.pps), 0.3, 60);
+  renderTimeline();
+  return dropped;
+}
+
+let autosaveTimer = null;
+function autosave() {
+  clearTimeout(autosaveTimer);
+  autosaveTimer = setTimeout(() => {
+    try { localStorage.setItem(AUTOSAVE_KEY, JSON.stringify(serialize())); } catch { /* storage full/blocked */ }
+  }, 300);
+}
+
+function projectStatus(msg, isError = false) {
+  const el = $("project-status");
+  el.textContent = msg;
+  el.classList.toggle("error", isError);
+  if (!isError) setTimeout(() => { if (el.textContent === msg) el.textContent = ""; }, 4000);
+}
+
+async function refreshProjectList() {
+  try {
+    const list = await (await fetch("/api/projects")).json();
+    $("project-names").innerHTML = list.map((p) => `<option value="${p.name}">`).join("");
+  } catch { /* offline */ }
+}
+
+$("project-save").addEventListener("click", async () => {
+  const name = $("project-name").value.trim();
+  if (!name) return projectStatus("Give the project a name first.", true);
+  if (!clips.length) return projectStatus("Nothing to save — the timeline is empty.", true);
+  try {
+    const res = await fetch(`/api/projects/${encodeURIComponent(name)}`, {
+      method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(serialize()),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    projectStatus(`Saved "${name}".`);
+    refreshProjectList();
+  } catch (err) { projectStatus(err.message, true); }
+});
+
+$("project-load").addEventListener("click", async () => {
+  const name = $("project-name").value.trim();
+  if (!name) return projectStatus("Type or pick a project name to load.", true);
+  if (clips.length && !confirm("Replace the current timeline with this project?")) return;
+  try {
+    const res = await fetch(`/api/projects/${encodeURIComponent(name)}`);
+    if (!res.ok) throw new Error(res.status === 404 ? `No project named "${name}".` : await res.text());
+    const dropped = await restore(await res.json());
+    projectStatus(dropped.length ? `Loaded; ${dropped.length} clip(s) skipped (source files missing): ${dropped.join(", ")}` : `Loaded "${name}".`, dropped.length > 0);
+  } catch (err) { projectStatus(err.message, true); }
+});
+
+$("project-export").addEventListener("click", () => {
+  if (!clips.length) return projectStatus("Nothing to export.", true);
+  const name = $("project-name").value.trim() || "karaoke-mix";
+  const blob = new Blob([JSON.stringify(serialize(), null, 2)], { type: "application/json" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `${name}.json`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+});
+
+$("project-import").addEventListener("click", async () => {
+  const text = prompt("Paste the project JSON:");
+  if (!text) return;
+  try {
+    const state = JSON.parse(text);
+    if (!Array.isArray(state.clips)) throw new Error("That doesn't look like a project (no clips).");
+    if (clips.length && !confirm("Replace the current timeline with the imported project?")) return;
+    const dropped = await restore(state);
+    projectStatus(dropped.length ? `Imported; ${dropped.length} clip(s) skipped (source files missing).` : "Imported.", dropped.length > 0);
+  } catch (err) { projectStatus(`Import failed: ${err.message}`, true); }
+});
+
 // ---------- create mix ----------
 
 $("make-mix").addEventListener("click", async () => {
   const status = $("mix-status");
   status.classList.remove("error");
   if (!clips.length) return showError(status, "Add at least one clip.");
+  stopPreview();
   const payload = clips.map((c) => ({
     job: c.job,
     track: c.track,
@@ -605,6 +1029,8 @@ $("make-mix").addEventListener("click", async () => {
     end: c.end,
     offset: c.offset,
     gain: c.gain,
+    tempo: c.tempo,
+    pitch: c.pitch,
   }));
   $("make-mix").disabled = true;
   $("mix-result").classList.add("hidden");
@@ -658,7 +1084,17 @@ document.querySelectorAll(".swatch").forEach((b) =>
   }));
 
 refreshPicker();
-loadLibrary();
+refreshProjectList();
+(async () => {
+  let saved = null;
+  try { saved = JSON.parse(localStorage.getItem(AUTOSAVE_KEY)); } catch { /* ignore */ }
+  if (saved && Array.isArray(saved.clips) && saved.clips.length) {
+    const dropped = await restore(saved);
+    projectStatus(dropped.length ? `Restored last session (${dropped.length} clip(s) skipped — files missing).` : "Restored your last session.", dropped.length > 0);
+  } else {
+    loadLibrary();
+  }
+})();
 </script>
 </body>
 </html>

@@ -19,8 +19,11 @@ ROOT = Path(__file__).resolve().parent.parent
 JOBS_DIR = ROOT / "data" / "jobs"
 FRONTEND_DIR = ROOT / "frontend"
 
+PROJECTS_DIR = ROOT / "data" / "projects"
+
 TRACKS = ("karaoke", "vocals", "original", "mix")
 _JOB_ID = re.compile(r"[0-9a-f]{12}")
+_PROJECT_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9 _.-]{0,59}")
 
 app = FastAPI(title="Karaoke Maker")
 
@@ -42,12 +45,18 @@ class Clip(BaseModel):
     end: float | None = Field(None, gt=0)
     offset: float = Field(0, ge=0)  # placement on the output timeline, seconds
     gain: float = Field(1.0, ge=0, le=10)
+    tempo: float = Field(1.0, ge=0.5, le=2.0)  # speed factor, pitch preserved
+    pitch: float = Field(0.0, ge=-12, le=12)  # semitones, tempo preserved
 
 
 class EQ(BaseModel):
     bass: float = Field(0, ge=-12, le=12)  # dB
     mid: float = Field(0, ge=-12, le=12)
     treble: float = Field(0, ge=-12, le=12)
+
+
+class RenameRequest(BaseModel):
+    title: str = Field(min_length=1, max_length=200)
 
 
 class MixRequest(BaseModel):
@@ -111,6 +120,7 @@ def _run_mix(job_id: str, req: MixRequest) -> None:
             {
                 "path": JOBS_DIR / c.job / f"{c.track}.mp3",
                 "start": c.start, "end": c.end, "offset": c.offset, "gain": c.gain,
+                "tempo": c.tempo, "pitch": c.pitch,
             }
             for c in req.clips
         ]
@@ -166,6 +176,20 @@ def create_mix(req: MixRequest) -> dict:
     return {"id": job_id}
 
 
+@app.patch("/api/jobs/{job_id}")
+def rename_job(job_id: str, req: RenameRequest) -> dict:
+    """Rename a track (persists to meta.json; used for library and download filenames)."""
+    job_dir = JOBS_DIR / job_id
+    if not (_JOB_ID.fullmatch(job_id) and job_dir.is_dir()):
+        raise HTTPException(404, "job not found")
+    title = req.title.strip()
+    _save_meta(job_dir, title=title)
+    with jobs_lock:
+        if job_id in jobs:
+            jobs[job_id]["title"] = title
+    return {"id": job_id, "title": title}
+
+
 @app.get("/api/jobs/{job_id}")
 def get_job(job_id: str) -> dict:
     with jobs_lock:
@@ -198,6 +222,47 @@ def library() -> list[dict]:
                     _save_meta(d, durations=durations)  # probe once, cache in meta.json
                 items.append({"job": d.name, "title": meta.get("title") or d.name, "tracks": tracks})
     return items
+
+
+# ---- projects: saved timeline arrangements (opaque JSON written by the frontend) ----
+
+def _project_path(name: str) -> Path:
+    if not _PROJECT_NAME.fullmatch(name):
+        raise HTTPException(400, "project name: letters, digits, spaces, _ . - (max 60)")
+    return PROJECTS_DIR / f"{name}.json"
+
+
+@app.get("/api/projects")
+def list_projects() -> list[dict]:
+    if not PROJECTS_DIR.exists():
+        return []
+    files = sorted(PROJECTS_DIR.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
+    return [{"name": p.stem, "updated": p.stat().st_mtime} for p in files]
+
+
+@app.get("/api/projects/{name}")
+def get_project(name: str) -> dict:
+    path = _project_path(name)
+    if not path.exists():
+        raise HTTPException(404, "project not found")
+    return json.loads(path.read_text())
+
+
+@app.put("/api/projects/{name}")
+def save_project(name: str, state: dict) -> dict:
+    path = _project_path(name)
+    PROJECTS_DIR.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(state))
+    return {"name": name}
+
+
+@app.delete("/api/projects/{name}")
+def delete_project(name: str) -> dict:
+    path = _project_path(name)
+    if not path.exists():
+        raise HTTPException(404, "project not found")
+    path.unlink()
+    return {"name": name}
 
 
 @app.get("/api/jobs/{job_id}/{track}.mp3")
