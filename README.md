@@ -96,5 +96,6 @@ data/jobs/     Output MP3s, one folder per job (gitignored)
 - **Job status is in memory** — restarting the server forgets in-flight jobs, but finished tracks stay on disk and remain usable via `/api/library` and the Cut & Mix section.
 - **Old jobs are never auto-deleted** — clear out `data/jobs/` occasionally if disk space matters.
 - **A job failed?** The `error` field in the job status includes the last lines of the failing tool's output.
+- **`HTTP Error 403: Forbidden` (or other YouTube download errors)?** YouTube changes its site frequently and yt-dlp must keep up — upgrade it and restart the server: `.venv/bin/pip install -U yt-dlp`. Expect to do this every few weeks.
 - **`address already in use` on startup?** Another process (often a previous server instance) is holding port 8000. Free it with `kill $(lsof -ti :8000)`, or run on a different port: `.venv/bin/uvicorn backend.app:app --port 8001`.
 - **Separation quality**: `htdemucs` is good but not perfect — expect slight vocal bleed on dense mixes. The quality ceiling is the YouTube source audio (~130–160 kbps Opus), not the 320 kbps MP3 encode.
