@@ -77,6 +77,7 @@ The worker communicates upward through a single `set_status(stage, progress)` ca
 
 ### 3.4 Mixing — `make_mix`
 - Cut & layer feature: each clip is `{path, start, end, offset, gain}` — `atrim` cuts the source, `asetpts` rebases timestamps, `adelay` places the clip on the output timeline, `volume` applies gain, then all clips merge via `amix` (`duration=longest`, `normalize=0` so levels are preserved; users compensate with per-clip gain).
+- Per-clip **tempo/pitch**: pitch shift is done by resampling (`asetrate` at `44100·2^(n/12)` then `aresample` back), which also changes speed by the same ratio; `atempo` then compensates so the net result is `tempo / 2^(n/12)`. `atempo` stages are chained to stay within its 0.5–2.0 range. (`rubberband` would be higher quality but isn't in the Homebrew ffmpeg build.) The UI sizes blocks by `(end−start)/tempo` and previews tempo via `playbackRate`; pitch is mix-only.
 - One ffmpeg invocation with a generated `filter_complex` graph; output re-encoded at 320 kbps.
 - **Master bus**: optional 3-band EQ (`bass`/`equalizer@1kHz`/`treble`, ±12 dB) and a "clarity enhance" chain — `highpass=60` (rumble), presence lift at 3.2 kHz, `loudnorm` to −14 LUFS (which also prevents clipping where loud clips overlap; `amix` runs with `normalize=0`), then `aresample=44100` since loudnorm outputs 192 kHz.
 - Mixes are jobs like any other (`stage="mixing"`, same store/queue) and their `mix.mp3` can itself be a clip source (composable).
@@ -187,6 +188,8 @@ Current: verified manually/by scripted checks —
 Planned (not yet implemented): commit those checks as a pytest suite — the `TestClient`/mock pattern already proven; pipeline tests use a small local audio fixture instead of hitting YouTube.
 
 ## 11. Future work (priority order)
+
+0. **Split the Mixer into a standalone, deployable web app** — session isolation, limits, cleanup, Dockerfile/fly.toml. Tracked in [issue #4](https://github.com/budhap-dev/karaoke-app/issues/4).
 
 1. **Initial git commit** — repo currently has zero commits.
 2. **Disk cleanup** — delete job folders older than N days at startup.

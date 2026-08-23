@@ -87,13 +87,36 @@ def encode_mp3(wav: Path, mp3: Path) -> None:
     _run_checked(["ffmpeg", "-y", "-i", str(wav), *MP3_ARGS, str(mp3)])
 
 
+def _tempo_pitch_steps(tempo: float, pitch: float, sr: int = 44100) -> list[str]:
+    """ffmpeg filters for a tempo factor (pitch-preserving) and a pitch shift in
+    semitones (tempo-preserving). Pitch is done by resampling (asetrate), which
+    also speeds the audio up by the same ratio, so atempo compensates."""
+    ratio = 2 ** (pitch / 12)
+    steps = []
+    if pitch:
+        steps += [f"aresample={sr}", f"asetrate={round(sr * ratio)}", f"aresample={sr}"]
+    factor = tempo / ratio
+    # atempo accepts 0.5–2.0 per stage; chain stages for anything outside.
+    while factor > 2.0:
+        steps.append("atempo=2.0")
+        factor /= 2.0
+    while factor < 0.5:
+        steps.append("atempo=0.5")
+        factor /= 0.5
+    if abs(factor - 1.0) > 1e-3:
+        steps.append(f"atempo={factor:.4f}")
+    return steps
+
+
 def make_mix(clips: list[dict], out_mp3: Path, eq: dict | None = None, enhance: bool = False) -> None:
     """Cut and layer audio clips into a single mp3.
 
     Each clip: {"path": Path, "start": float|None, "end": float|None,
-    "offset": float, "gain": float}. start/end cut the source; offset places
-    the cut on the output timeline. Overlapping clips blend together,
-    back-to-back offsets form a medley.
+    "offset": float, "gain": float, "tempo": float, "pitch": float}.
+    start/end cut the source; tempo (x, pitch-preserving) and pitch
+    (semitones, tempo-preserving) transform it; offset places the result on
+    the output timeline. Overlapping clips blend together, back-to-back
+    offsets form a medley.
 
     eq: optional master EQ, {"bass": dB, "mid": dB, "treble": dB}.
     enhance: master clarity chain — rumble cut, presence lift, loudness
@@ -111,6 +134,7 @@ def make_mix(clips: list[dict], out_mp3: Path, eq: dict | None = None, enhance: 
             if clip.get("end") is not None:
                 args.append(f"end={clip['end']}")
             steps += ["atrim=" + ":".join(args), "asetpts=PTS-STARTPTS"]
+        steps += _tempo_pitch_steps(clip.get("tempo", 1.0), clip.get("pitch", 0.0))
         if clip.get("offset"):
             steps.append(f"adelay={int(clip['offset'] * 1000)}:all=1")
         if clip.get("gain", 1) != 1:

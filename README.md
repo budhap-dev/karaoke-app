@@ -66,7 +66,7 @@ The web UI uses a small JSON API you can also call directly:
 | `GET` | `/api/jobs/{id}/mix.mp3` | Result of a mix job |
 | `GET` | `/api/library` | All finished tracks on disk (survives restarts): `[{job, title, tracks: [{track, duration}]}]` |
 | `POST` | `/api/uploads` | Add your own audio file to the library (multipart `file`). Transcoded to mp3; returns `{id, title}` |
-| `POST` | `/api/mixes` | Create a mix. Body: `{"clips": [{"job", "track", "start?", "end?", "offset?", "gain?"}], "title?", "eq?": {"bass", "mid", "treble"}, "enhance?": bool}` — times in seconds; `start`/`end` cut the source, `offset` places the clip on the timeline, overlapping clips blend. `eq` is a master 3-band EQ in dB (±12); `enhance` applies the clarity chain (rumble cut, presence lift, loudness normalization). Returns `{"id"}`; poll like a normal job |
+| `POST` | `/api/mixes` | Create a mix. Body: `{"clips": [{"job", "track", "start?", "end?", "offset?", "gain?", "tempo?", "pitch?"}], "title?", "eq?": {"bass", "mid", "treble"}, "enhance?": bool}` — times in seconds; `start`/`end` cut the source, `offset` places the clip on the timeline, overlapping clips blend; `tempo` is a speed factor 0.5–2 (pitch preserved), `pitch` is ±12 semitones (tempo preserved). `eq` is a master 3-band EQ in dB (±12); `enhance` applies the clarity chain (rumble cut, presence lift, loudness normalization). Returns `{"id"}`; poll like a normal job |
 
 Example:
 
