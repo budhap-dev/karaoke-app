@@ -189,7 +189,7 @@ Planned (not yet implemented): commit those checks as a pytest suite — the `Te
 
 ## 11. Future work (priority order)
 
-0. **Split the Mixer into a standalone, deployable web app** — session isolation, limits, cleanup, Dockerfile/fly.toml. Tracked in [issue #4](https://github.com/budhap-dev/karaoke-app/issues/4).
+0. **Standalone Mixer as a browser-only React app** — React + TS + Vite, Web Audio engine (live full-mix preview), OfflineAudioContext render + lamejs MP3 export, SoundTouch worklet for speed/pitch, IndexedDB projects, static hosting. No backend; audio never leaves the machine. Tracked in [issue #4](https://github.com/budhap-dev/karaoke-app/issues/4).
 
 1. **Initial git commit** — repo currently has zero commits.
 2. **Disk cleanup** — delete job folders older than N days at startup.
