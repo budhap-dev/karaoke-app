@@ -2,9 +2,9 @@
 
 Paste a YouTube link, get back three MP3s: a **karaoke track** (instrumental, vocals removed), the **isolated vocals**, and the **original song** — all encoded at 320 kbps.
 
-Then **cut & mix** on a drag-and-drop timeline: **upload your MP3s** — each lands as a clip — drag blocks to place them in time, drag their edges to cut, with times shown live. Overlap clips to blend them, or chain them into a medley, and download the result as a single MP3. (The API can additionally mix processed karaoke/vocals tracks.)
-
 Vocal separation is done locally with [Demucs](https://github.com/facebookresearch/demucs) (`htdemucs` model). Nothing is sent to any external service except the YouTube download itself.
+
+> ✂️ **Looking for the Cut & Mix studio?** It's now its own app — [**Music Mixer**](https://github.com/budhap-dev/music-mixer), browser-only (nothing uploaded), built in React. Make karaoke tracks here, then open them there to cut, layer, speed/pitch-shift and EQ.
 
 ## How it works
 
@@ -59,14 +59,10 @@ The web UI uses a small JSON API you can also call directly:
 | Method | Path | Description |
 |---|---|---|
 | `POST` | `/api/jobs` | Start a job. Body: `{"url": "https://..."}`. Returns `{"id": "..."}` |
-| `GET` | `/api/jobs/{id}` | Job status: `stage` (`queued` / `downloading` / `separating` / `encoding` / `mixing` / `done` / `error`), `progress` (0–1 or null), `title`, `error`, and `sizes` (bytes per track, when done) |
+| `GET` | `/api/jobs/{id}` | Job status: `stage` (`queued` / `downloading` / `separating` / `encoding` / `done` / `error`), `progress` (0–1 or null), `title`, `error`, and `sizes` (bytes per track, when done) |
 | `GET` | `/api/jobs/{id}/karaoke.mp3` | Instrumental track |
 | `GET` | `/api/jobs/{id}/vocals.mp3` | Vocals-only track |
 | `GET` | `/api/jobs/{id}/original.mp3` | Original song |
-| `GET` | `/api/jobs/{id}/mix.mp3` | Result of a mix job |
-| `GET` | `/api/library` | All finished tracks on disk (survives restarts): `[{job, title, tracks: [{track, duration}]}]` |
-| `POST` | `/api/uploads` | Add your own audio file to the library (multipart `file`). Transcoded to mp3; returns `{id, title}` |
-| `POST` | `/api/mixes` | Create a mix. Body: `{"clips": [{"job", "track", "start?", "end?", "offset?", "gain?", "tempo?", "pitch?"}], "title?", "eq?": {"bass", "mid", "treble"}, "enhance?": bool}` — times in seconds; `start`/`end` cut the source, `offset` places the clip on the timeline, overlapping clips blend; `tempo` is a speed factor 0.5–2 (pitch preserved), `pitch` is ±12 semitones (tempo preserved). `eq` is a master 3-band EQ in dB (±12); `enhance` applies the clarity chain (rumble cut, presence lift, loudness normalization). Returns `{"id"}`; poll like a normal job |
 
 Example:
 
@@ -93,7 +89,7 @@ data/jobs/     Output MP3s, one folder per job (gitignored)
 
 ## Notes & troubleshooting
 
-- **Job status is in memory** — restarting the server forgets in-flight jobs, but finished tracks stay on disk and remain usable via `/api/library` and the Cut & Mix section.
+- **Job status is in memory** — restarting the server forgets past jobs; the MP3 files stay on disk under `data/jobs/` and their direct URLs keep working.
 - **Old jobs are never auto-deleted** — clear out `data/jobs/` occasionally if disk space matters.
 - **A job failed?** The `error` field in the job status includes the last lines of the failing tool's output.
 - **`HTTP Error 403: Forbidden` (or other YouTube download errors)?** YouTube changes its site frequently and yt-dlp must keep up — upgrade it and restart the server: `.venv/bin/pip install -U yt-dlp`. Expect to do this every few weeks.
