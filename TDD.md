@@ -20,7 +20,7 @@ Karaoke Maker is a self-hosted web app that turns a YouTube link into three MP3s
 - Multi-user or public deployment (no auth, no rate limiting, no HTTPS).
 - Persistence of job history across server restarts.
 - Multi-track stem separation (drums/bass/other) — only two-stem vocals/instrumental.
-- Waveform rendering — the timeline editor shows clips as draggable blocks with live times, but does not draw audio waveforms.
+- Cutting/mixing audio — that's now a separate app, [Music Mixer](https://github.com/budhap-dev/music-mixer) (browser-only React; see §11).
 
 ## 2. Architecture
 
@@ -75,16 +75,7 @@ The worker communicates upward through a single `set_status(stage, progress)` ca
 - Encodes both stems and the original source audio to MP3.
 - 320k chosen after user preference; note the true quality ceiling is the YouTube source (~130–160 kbps Opus) and separation artifacts, not the encode.
 
-### 3.4 Mixing — `make_mix`
-- Cut & layer feature: each clip is `{path, start, end, offset, gain}` — `atrim` cuts the source, `asetpts` rebases timestamps, `adelay` places the clip on the output timeline, `volume` applies gain, then all clips merge via `amix` (`duration=longest`, `normalize=0` so levels are preserved; users compensate with per-clip gain).
-- Per-clip **tempo/pitch**: pitch shift is done by resampling (`asetrate` at `44100·2^(n/12)` then `aresample` back), which also changes speed by the same ratio; `atempo` then compensates so the net result is `tempo / 2^(n/12)`. `atempo` stages are chained to stay within its 0.5–2.0 range. (`rubberband` would be higher quality but isn't in the Homebrew ffmpeg build.) The UI sizes blocks by `(end−start)/tempo` and previews tempo via `playbackRate`; pitch is mix-only.
-- One ffmpeg invocation with a generated `filter_complex` graph; output re-encoded at 320 kbps.
-- **Master bus**: optional 3-band EQ (`bass`/`equalizer@1kHz`/`treble`, ±12 dB) and a "clarity enhance" chain — `highpass=60` (rumble), presence lift at 3.2 kHz, `loudnorm` to −14 LUFS (which also prevents clipping where loud clips overlap; `amix` runs with `normalize=0`), then `aresample=44100` since loudnorm outputs 192 kHz.
-- Mixes are jobs like any other (`stage="mixing"`, same store/queue) and their `mix.mp3` can itself be a clip source (composable).
-- Sources are resolved from disk (`data/jobs/<id>/<track>.mp3`), not the in-memory store — so tracks from before a server restart are mixable. `/api/library` scans the disk for this; each job's title is persisted in a `meta.json` alongside the MP3s, and per-track durations (probed via ffprobe on first listing) are cached there too — the timeline UI needs them to size clip blocks.
-- **Uploads**: `POST /api/uploads` accepts the user's own audio (multipart). The file is transcoded to `original.mp3` in a fresh job dir — transcoding doubles as validation (garbage → 400, dir removed) and normalizes any input format. Uploads then behave exactly like processed songs in the library/mixer. Requires `python-multipart`.
-
-### 3.5 Cleanup
+### 3.4 Cleanup
 - Deletes the `stems/` directory (two full-length WAVs, ~100 MB+) and the downloaded source file.
 - Final disk footprint per job: three MP3s (~7–10 MB each for a typical song).
 
@@ -124,9 +115,7 @@ In-memory `dict[str, dict]` guarded by a `threading.Lock`:
 |---|---|---|---|
 | `POST` | `/api/jobs` | `{"url": str}` | `201-ish {"id": str}` — returns immediately; work happens in background |
 | `GET` | `/api/jobs/{id}` | — | Full job record (schema above) + `id`. `404` if unknown. |
-| `POST` | `/api/mixes` | `{clips: [{job, track, start?, end?, offset?, gain?}], title?}` | `{"id": str}` — a mix job, polled like any other |
-| `GET` | `/api/library` | — | Disk scan of finished tracks: `[{job, title, tracks}]` |
-| `GET` | `/api/jobs/{id}/{track}.mp3` | `track ∈ {karaoke, vocals, original, mix}` | `FileResponse`, `audio/mpeg`, download filename `"<title> (<track>).mp3"`. `404` if track unknown, job unknown, or file not yet produced. |
+| `GET` | `/api/jobs/{id}/{track}.mp3` | `track ∈ {karaoke, vocals, original}` | `FileResponse`, `audio/mpeg`, download filename `"<title> (<track>).mp3"`. `404` if track unknown, job unknown, or file not yet produced. |
 | `GET` | `/` (and any static path) | — | `StaticFiles` mount serving `frontend/` (`html=True`). Mounted last so `/api/*` wins routing. |
 
 ### Status transport: polling, not SSE/WebSockets
@@ -139,7 +128,6 @@ Known limitation: FastAPI does not auto-register `HEAD` handlers, so `HEAD` on t
 - **Single HTML file, vanilla JS** (~150 lines). No framework/build: the UI is one form, one status line, one `<progress>`, three `<audio>` players.
 - State machine mirrors the backend stages; `STAGE_LABELS` maps them to human text. `progress != null` → determinate bar + percentage in the status line; `null` → bar hidden (indeterminate stages).
 - Results section: per track an inline `<audio controls>` player and a download link labeled with the human-formatted size (`9.7 MB`), computed from `sizes` in the final status payload.
-- **Timeline editor** (Cut & Mix): each clip is a lane — a fixed head (title, volume, remove) beside a horizontally scrollable track area sharing one time ruler (3 px/s). The clip block shows its placement and cut times live; pointer-capture drag on the body moves `offset`, on the edge handles trims `start`/`end` (left-edge trim shifts the block right, DAW-style; values clamped to the source duration, min clip 0.5 s). State lives in a plain JS array; the DOM re-renders on structural changes and only the dragged block updates during a drag.
 - Errors (submit failure, poll failure, `stage="error"`) render the message in red and re-enable the form.
 - `color-scheme: light dark` for automatic dark-mode support.
 
@@ -189,7 +177,7 @@ Planned (not yet implemented): commit those checks as a pytest suite — the `Te
 
 ## 11. Future work (priority order)
 
-0. **Split the Mixer into a standalone, deployable web app** — session isolation, limits, cleanup, Dockerfile/fly.toml. Tracked in [issue #4](https://github.com/budhap-dev/karaoke-app/issues/4).
+0. ~~Standalone Mixer~~ — **done, as its own repo**: [music-mixer](https://github.com/budhap-dev/music-mixer) (browser-only React; roadmap in [its issue #1](https://github.com/budhap-dev/music-mixer/issues/1)). The server-side mixer that used to live here was removed; its final form is preserved on the `feat/mixer-editing-and-projects` branch.
 
 1. **Initial git commit** — repo currently has zero commits.
 2. **Disk cleanup** — delete job folders older than N days at startup.
