@@ -5,3 +5,5 @@ demucs
 numpy
 torch
 torchaudio
+audio-separator[cpu]
+audioread

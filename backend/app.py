@@ -18,7 +18,7 @@ ROOT = Path(__file__).resolve().parent.parent
 JOBS_DIR = ROOT / "data" / "jobs"
 FRONTEND_DIR = ROOT / "frontend"
 
-TRACKS = ("karaoke", "vocals", "original")
+TRACKS = ("karaoke", "karaoke_chorus", "vocals", "original")
 _JOB_ID = re.compile(r"[0-9a-f]{12}")
 
 app = FastAPI(title="Karaoke Maker")
@@ -32,6 +32,7 @@ jobs_lock = threading.Lock()
 
 class JobRequest(BaseModel):
     url: str
+    keep_chorus: bool = False  # also produce karaoke_chorus.mp3 (backing vocals kept)
 
 
 def _set_status(job_id: str, stage: str, progress: float | None) -> None:
@@ -46,10 +47,10 @@ def _title_of(job_dir: Path) -> str | None:
         return None
 
 
-def _run_job(job_id: str, url: str) -> None:
+def _run_job(job_id: str, url: str, keep_chorus: bool) -> None:
     job_dir = JOBS_DIR / job_id
     try:
-        result = worker.run_pipeline(url, job_dir, lambda s, p: _set_status(job_id, s, p))
+        result = worker.run_pipeline(url, job_dir, lambda s, p: _set_status(job_id, s, p), keep_chorus=keep_chorus)
         (job_dir / "meta.json").write_text(json.dumps({"title": result["title"]}))
         sizes = {t: p.stat().st_size for t in TRACKS if (p := job_dir / f"{t}.mp3").exists()}
         with jobs_lock:
@@ -64,7 +65,7 @@ def create_job(req: JobRequest) -> dict:
     job_id = uuid.uuid4().hex[:12]
     with jobs_lock:
         jobs[job_id] = {"stage": "queued", "progress": None, "title": None, "error": None, "sizes": None}
-    executor.submit(_run_job, job_id, req.url)
+    executor.submit(_run_job, job_id, req.url, req.keep_chorus)
     return {"id": job_id}
 
 
