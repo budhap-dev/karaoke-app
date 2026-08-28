@@ -51,6 +51,13 @@
   form { display: flex; gap: 0.5rem; margin: 1.5rem 0 0.5rem; }
   .opt { display: flex; align-items: center; gap: 0.4rem; font-size: 0.9rem; margin-bottom: 1rem; flex-wrap: wrap; }
   .opt input { accent-color: var(--accent); }
+  .dl-section { margin: 1rem 0 1.5rem; padding: 0.7rem 0.9rem; border: 1px solid var(--border-soft); border-radius: 10px; }
+  .dl-row { display: flex; gap: 0.5rem; margin-top: 0.5rem; flex-wrap: wrap; align-items: stretch; }
+  .mp4-group { display: flex; gap: 0.5rem; align-items: stretch; }
+  .mp4-group select { align-self: stretch; }
+  button.secondary { background: none; color: var(--accent); border: 1px solid var(--accent); }
+  #dl-status { min-height: 1.3em; margin-top: 0.5rem; font-size: 0.9rem; }
+  #mp4-quality { padding: 0.45rem 0.6rem; border: 1px solid var(--border); border-radius: 8px; background: inherit; color: inherit; }
   .hint { font-size: 0.85rem; opacity: 0.75; }
   input[type="url"] {
     flex: 1;
@@ -144,6 +151,20 @@
   <span class="hint">(runs an extra lead-vocal separation model — adds ~30s)</span>
 </label>
 
+<div class="dl-section">
+  <span class="hint">Or just download from YouTube (no separation):</span>
+  <div class="dl-row">
+    <button class="secondary" id="dl-mp3" type="button">⬇ Audio MP3 (320 kbps)</button>
+    <div class="mp4-group">
+      <button class="secondary" id="dl-mp4" type="button">⬇ Video MP4…</button>
+      <select id="mp4-quality" hidden></select>
+    </div>
+  </div>
+  <div id="dl-status"></div>
+  <progress id="dl-bar" value="0" max="1" hidden></progress>
+  <a class="download hidden" id="dl-link" download></a>
+</div>
+
 <div id="status"></div>
 <progress id="bar" value="0" max="1" hidden></progress>
 
@@ -185,6 +206,7 @@ const STAGE_LABELS = {
   separating: "Separating vocals (this takes a few minutes)…",
   encoding: "Encoding MP3s…",
   separating_chorus: "Keeping backing vocals (second separation pass)…",
+  merging: "Merging video and audio…",
 };
 
 let poller = null;
@@ -271,6 +293,137 @@ function formatSize(bytes) {
     ? `${(bytes / 1024 / 1024).toFixed(1)} MB`
     : `${Math.round(bytes / 1024)} KB`;
 }
+
+// ---------- direct downloads ----------
+
+let dlPoller = null;
+let probed = null; // cached /api/probe result for the current URL
+
+async function ensureProbe() {
+  if (probed && probed.url === $("url").value) return probed;
+  $("dl-status").classList.remove("error");
+  $("dl-status").textContent = "Checking formats and sizes…";
+  const res = await fetch("/api/probe", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ url: $("url").value }),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  probed = { url: $("url").value, ...(await res.json()) };
+  if (probed.mp3_size) {
+    $("dl-mp3").textContent = `⬇ Audio MP3 (320 kbps, ~${formatSize(probed.mp3_size)})`;
+  }
+  $("mp4-quality").innerHTML = probed.heights
+    .map((h) => `<option value="${h.height}">${h.height}p${h.size ? ` (~${formatSize(h.size)})` : ""}</option>`)
+    .join("");
+  $("dl-status").textContent = "";
+  return probed;
+}
+
+function dlFail(msg) {
+  clearInterval(dlPoller);
+  $("dl-status").textContent = msg;
+  $("dl-status").classList.add("error");
+  $("dl-bar").hidden = true;
+  $("dl-mp3").disabled = $("dl-mp4").disabled = false;
+}
+
+async function startDownload(body) {
+  clearInterval(dlPoller);
+  $("dl-link").classList.add("hidden");
+  $("dl-status").classList.remove("error");
+  $("dl-status").textContent = "Submitting…";
+  $("dl-mp3").disabled = $("dl-mp4").disabled = true;
+  try {
+    const res = await fetch("/api/downloads", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    const { id } = await res.json();
+    dlPoller = setInterval(() => dlPoll(id), 1000);
+  } catch (err) {
+    dlFail(err.message);
+  }
+}
+
+async function dlPoll(id) {
+  let job;
+  try {
+    const res = await fetch(`/api/jobs/${id}`);
+    if (!res.ok) throw new Error(await res.text());
+    job = await res.json();
+  } catch (err) {
+    return dlFail(err.message);
+  }
+  if (job.stage === "error") {
+    dlFail(job.error || "Download failed.");
+  } else if (job.stage === "done") {
+    clearInterval(dlPoller);
+    $("dl-mp3").disabled = $("dl-mp4").disabled = false;
+    $("dl-bar").hidden = true;
+    $("dl-status").textContent = "Done!";
+    const link = $("dl-link");
+    link.href = `/api/jobs/${id}/download.${job.file.ext}`;
+    link.textContent = `⬇ Save "${job.title}" (${job.file.ext.toUpperCase()}, ${formatSize(job.file.size)})`;
+    link.classList.remove("hidden");
+  } else {
+    const label = STAGE_LABELS[job.stage] || job.stage;
+    if (job.progress != null) {
+      $("dl-status").textContent = `${label} ${Math.round(job.progress * 100)}%`;
+      $("dl-bar").hidden = false;
+      $("dl-bar").value = job.progress;
+    } else {
+      $("dl-status").textContent = label;
+      $("dl-bar").hidden = true;
+    }
+  }
+}
+
+$("dl-mp3").addEventListener("click", async () => {
+  if (!$("url").reportValidity()) return;
+  $("dl-mp3").disabled = true;
+  try {
+    await ensureProbe(); // shows the size on the button for next time too
+  } catch (err) {
+    return dlFail(err.message);
+  } finally {
+    $("dl-mp3").disabled = false;
+  }
+  startDownload({ url: $("url").value, kind: "mp3" });
+});
+
+$("dl-mp4").addEventListener("click", async () => {
+  if (!$("url").reportValidity()) return;
+  const sel = $("mp4-quality");
+  if (sel.hidden) {
+    // first click: look up this video's available qualities and sizes
+    $("dl-mp4").disabled = true;
+    try {
+      const { heights } = await ensureProbe();
+      if (!heights.length) throw new Error("No video formats found for this URL.");
+      sel.hidden = false;
+      $("dl-mp4").textContent = "⬇ Download MP4";
+      $("dl-status").textContent = "Pick a quality, then download.";
+    } catch (err) {
+      $("dl-status").textContent = err.message;
+      $("dl-status").classList.add("error");
+    } finally {
+      $("dl-mp4").disabled = false;
+    }
+  } else {
+    startDownload({ url: $("url").value, kind: "mp4", quality: Number(sel.value) });
+  }
+});
+
+// a different URL means the probed qualities/sizes are stale
+$("url").addEventListener("input", () => {
+  probed = null;
+  $("mp4-quality").hidden = true;
+  $("dl-mp4").textContent = "⬇ Video MP4…";
+  $("dl-mp3").textContent = "⬇ Audio MP3 (320 kbps)";
+});
 
 // ---------- theme picker ----------
 
