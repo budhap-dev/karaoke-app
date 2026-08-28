@@ -148,6 +148,100 @@ def make_chorus_karaoke(source_audio: Path, job_dir: Path, mp3: Path, on_progres
         shutil.rmtree(work, ignore_errors=True)
 
 
+def probe_formats(url: str) -> dict:
+    """Title, 320k-MP3 size estimate, and available MP4 heights with size
+    estimates (video stream + audio stream), without downloading."""
+    opts = {"quiet": True, "no_warnings": True, "noplaylist": True}
+    with yt_dlp.YoutubeDL(opts) as ydl:
+        info = ydl.extract_info(url, download=False)
+    formats = info.get("formats", [])
+
+    def fsize(f):
+        return f.get("filesize") or f.get("filesize_approx")
+
+    # audio stream size, for the mp4 merge estimate (prefer m4a — that's what we fetch)
+    audio = [f for f in formats
+             if f.get("vcodec") in (None, "none") and f.get("acodec") not in (None, "none")]
+    m4a = [f for f in audio if f.get("ext") == "m4a"] or audio
+    audio_size = max((fsize(f) or 0 for f in m4a), default=0)
+
+    # per height: size of the best matching video stream (avc1 preferred, like the download)
+    by_height: dict[int, dict] = {}
+    for f in formats:
+        h = f.get("height")
+        if not h or f.get("vcodec") in (None, "none"):
+            continue
+        pref = str(f.get("vcodec", "")).startswith("avc1")
+        size = fsize(f)
+        cur = by_height.get(h)
+        if cur is None or (pref, size or 0) > (cur["pref"], cur["size"] or 0):
+            by_height[h] = {"pref": pref, "size": size}
+
+    heights = [
+        {"height": h, "size": (v["size"] + audio_size) if v["size"] else None}
+        for h, v in sorted(by_height.items(), reverse=True)
+    ]
+    # 320 kbps CBR = 40 KB per second
+    duration = info.get("duration")
+    mp3_size = int(duration * 40_000) if duration else None
+    return {"title": info.get("title", "Unknown title"), "mp3_size": mp3_size, "heights": heights}
+
+
+def download_mp3(url: str, job_dir: Path, set_status) -> dict:
+    """Just the audio, as 320 kbps MP3 — no separation."""
+    job_dir.mkdir(parents=True, exist_ok=True)
+    set_status("downloading", 0.0)
+    audio, title = download_audio(url, job_dir, lambda p: set_status("downloading", p))
+    set_status("encoding", None)
+    mp3 = job_dir / "download.mp3"
+    encode_mp3(audio, mp3)
+    audio.unlink(missing_ok=True)
+    return {"title": title, "file": mp3}
+
+
+def download_mp4(url: str, height: int, job_dir: Path, set_status) -> dict:
+    """Video+audio at up to the requested height, merged into an MP4."""
+    job_dir.mkdir(parents=True, exist_ok=True)
+    set_status("downloading", 0.0)
+
+    # Video and audio download as separate files, each with its own 0-100%;
+    # fold them into one bar (video dominates, audio phase is quick).
+    state = {"phase": 0, "last": 0.0}
+
+    def hook(d):
+        if d["status"] == "downloading":
+            total = d.get("total_bytes") or d.get("total_bytes_estimate")
+            if not total:
+                return
+            p = d.get("downloaded_bytes", 0) / total
+            if p < state["last"] - 0.5:
+                state["phase"] = 1
+            state["last"] = p
+            set_status("downloading", min((state["phase"] + p) / 2, 1.0))
+        elif d["status"] == "finished" and state["phase"] == 1:
+            set_status("merging", None)
+
+    opts = {
+        # Prefer H.264 + AAC so the .mp4 plays everywhere (Safari/QuickTime
+        # reject VP9/Opus remuxed into mp4); fall back to whatever exists.
+        "format": (
+            f"bestvideo[height<={height}][vcodec^=avc1]+bestaudio[ext=m4a]/"
+            f"bestvideo[height<={height}][ext=mp4]+bestaudio[ext=m4a]/"
+            f"best[height<={height}][ext=mp4]/"
+            f"bestvideo[height<={height}]+bestaudio/best[height<={height}]"
+        ),
+        "merge_output_format": "mp4",
+        "outtmpl": str(job_dir / "download.%(ext)s"),
+        "noplaylist": True,
+        "progress_hooks": [hook],
+        "quiet": True,
+        "no_warnings": True,
+    }
+    with yt_dlp.YoutubeDL(opts) as ydl:
+        info = ydl.extract_info(url, download=True)
+    return {"title": info.get("title", "Unknown title"), "file": job_dir / "download.mp4"}
+
+
 def run_pipeline(url: str, job_dir: Path, set_status, keep_chorus: bool = False) -> dict:
     """Full pipeline. set_status(stage, progress) reports to the job store.
 

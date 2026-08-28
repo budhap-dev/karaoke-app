@@ -46,7 +46,7 @@ The first job you run will also download the Demucs model weights (~80 MB, cache
 
 Then open **http://127.0.0.1:8000** in your browser:
 
-1. Paste a YouTube link and click **Make karaoke**. Optionally tick **Keep backing/chorus vocals** to also get a karaoke variant that keeps harmonies (see note below).
+1. Paste a YouTube link and click **Make karaoke** — or use the **direct download** buttons to just grab the audio (MP3 320 kbps) or video (MP4, picking from the available qualities) without separation. Optionally tick **Keep backing/chorus vocals** to also get a karaoke variant that keeps harmonies (see note below).
 2. Watch the progress — downloading → separating (takes a few minutes) → encoding.
 3. Play all three tracks in the browser or download them (file sizes shown on the links).
 
@@ -64,6 +64,9 @@ The web UI uses a small JSON API you can also call directly:
 | `GET` | `/api/jobs/{id}/vocals.mp3` | Vocals-only track |
 | `GET` | `/api/jobs/{id}/original.mp3` | Original song |
 | `GET` | `/api/jobs/{id}/karaoke_chorus.mp3` | Karaoke keeping backing vocals (only when requested) |
+| `POST` | `/api/probe` | `{"url"}` → video title + available MP4 heights (no download) |
+| `POST` | `/api/downloads` | Direct download, no separation. Body: `{"url", "kind": "mp3"\|"mp4", "quality?": height}` — mp3 is 320 kbps; mp4 prefers H.264+AAC at up to the chosen height. Poll like a normal job |
+| `GET` | `/api/jobs/{id}/download.mp3` / `.mp4` | The direct-download result |
 
 Example:
 
