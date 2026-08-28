@@ -4,7 +4,7 @@ Paste a YouTube link, get back three MP3s: a **karaoke track** (instrumental, vo
 
 Vocal separation is done locally with [Demucs](https://github.com/facebookresearch/demucs) (`htdemucs` model). Nothing is sent to any external service except the YouTube download itself.
 
-> ✂️ **Looking for the Cut & Mix studio?** It's now its own app — [**Music Mixer**](https://github.com/budhap-dev/music-mixer), browser-only (nothing uploaded), built in React. Make karaoke tracks here, then open them there to cut, layer, speed/pitch-shift and EQ.
+> ✂️ **Looking for the Cut & Mix studio?** It's now its own app — [**Music Mixer**](https://musicmixerweb.vercel.app/) ([source](https://github.com/budhap-dev/music-mixer)), browser-only (nothing uploaded), built in React. Make karaoke tracks here, then open them there to cut, layer, speed/pitch-shift and EQ.
 
 ## How it works
 
