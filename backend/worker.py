@@ -54,6 +54,29 @@ def download_audio(url: str, job_dir: Path, on_progress) -> tuple[Path, str]:
 # Matches the processed/total fraction in demucs's tqdm bar, e.g. "117.0/257.4".
 _TQDM_FRACTION = re.compile(r"(\d+(?:\.\d+)?)/(\d+(?:\.\d+)?)")
 
+# Matches a tqdm percentage, e.g. " 47%|".
+_TQDM_PERCENT = re.compile(r"(\d+)%\|")
+
+
+def _run_streaming(cmd: list[str], on_line) -> None:
+    """Run a command, streaming its output line by line to on_line (tqdm redraws
+    with \r, so raw chunks are split on \r or \n). Raises with the stderr tail
+    on failure, like _run_checked."""
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    tail: deque[str] = deque(maxlen=10)
+    buf = ""
+    while chunk := proc.stdout.read(256):
+        buf += chunk
+        *lines, buf = re.split(r"[\r\n]", buf)
+        for line in lines:
+            if not line.strip():
+                continue
+            tail.append(line.strip())
+            on_line(line)
+    proc.wait()
+    if proc.returncode != 0:
+        raise RuntimeError(f"{Path(cmd[0]).name} failed (exit {proc.returncode}):\n" + "\n".join(tail))
+
 
 def separate(audio: Path, job_dir: Path, on_progress) -> tuple[Path, Path]:
     """Run demucs two-stem separation. Returns (karaoke_wav, vocals_wav)."""
@@ -65,24 +88,13 @@ def separate(audio: Path, job_dir: Path, on_progress) -> tuple[Path, Path]:
         "-o", str(out_dir),
         str(audio),
     ]
-    # tqdm redraws its bar with \r on stderr, so read raw chunks and split on \r or \n.
-    proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
-    tail: deque[str] = deque(maxlen=10)
-    buf = ""
-    while chunk := proc.stderr.read(256):
-        buf += chunk
-        *lines, buf = re.split(r"[\r\n]", buf)
-        for line in lines:
-            if not line.strip():
-                continue
-            tail.append(line.strip())
-            # Only the separation bar counts in seconds — skip e.g. the model-download bar.
-            m = _TQDM_FRACTION.search(line) if "second" in line else None
-            if m and float(m.group(2)) > 0:
-                on_progress(min(float(m.group(1)) / float(m.group(2)), 1.0))
-    proc.wait()
-    if proc.returncode != 0:
-        raise RuntimeError(f"demucs failed (exit {proc.returncode}):\n" + "\n".join(tail))
+    def on_line(line: str) -> None:
+        # Only the separation bar counts in seconds — skip e.g. the model-download bar.
+        m = _TQDM_FRACTION.search(line) if "second" in line else None
+        if m and float(m.group(2)) > 0:
+            on_progress(min(float(m.group(1)) / float(m.group(2)), 1.0))
+
+    _run_streaming(cmd, on_line)
     stem_dir = out_dir / DEMUCS_MODEL / audio.stem
     return stem_dir / "no_vocals.wav", stem_dir / "vocals.wav"
 
@@ -91,7 +103,52 @@ def encode_mp3(wav: Path, mp3: Path) -> None:
     _run_checked(["ffmpeg", "-y", "-i", str(wav), *MP3_ARGS, str(mp3)])
 
 
-def run_pipeline(url: str, job_dir: Path, set_status) -> dict:
+KARAOKE_MODEL = "UVR_MDXNET_KARA_2.onnx"  # UVR "karaoke" model: removes lead vocal only
+MODEL_CACHE = Path.home() / ".cache" / "audio-separator"
+
+
+def make_chorus_karaoke(source_audio: Path, job_dir: Path, mp3: Path, on_progress) -> None:
+    """Karaoke that keeps backing/chorus vocals.
+
+    Runs a dedicated lead-vocal separation model (UVR MDX-Net Karaoke) on the
+    original mix; its "Instrumental" output is music + backing vocals with only
+    the lead removed. Unlike centre-channel tricks this works even when the
+    lead has wide doubling or stereo reverb.
+    """
+    work = job_dir / "chorus"
+    work.mkdir(exist_ok=True)
+    try:
+        wav = work / "input.wav"  # the separator reads wav/flac/mp3, not webm
+        _run_checked(["ffmpeg", "-y", "-i", str(source_audio), str(wav)])
+        # The MDX model runs two full passes over the audio, each with its own
+        # 0-100% bar; fold them into one continuous bar.
+        passes = 2
+        state = {"pass": 0, "last": 0.0}
+
+        def on_line(line: str) -> None:
+            m = _TQDM_PERCENT.search(line)
+            if not m:
+                return
+            pct = int(m.group(1)) / 100
+            if pct < state["last"] - 0.5:  # bar reset -> next pass started
+                state["pass"] = min(state["pass"] + 1, passes - 1)
+            state["last"] = pct
+            on_progress(min((state["pass"] + pct) / passes, 1.0))
+
+        _run_streaming([
+            str(Path(sys.executable).parent / "audio-separator"), str(wav),
+            "--model_filename", KARAOKE_MODEL,
+            "--model_file_dir", str(MODEL_CACHE),
+            "--output_dir", str(work),
+            "--output_format", "WAV",
+        ], on_line)
+        instrumental = next(work.glob("*_(Instrumental)_*.wav"))
+        encode_mp3(instrumental, mp3)
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
+def run_pipeline(url: str, job_dir: Path, set_status, keep_chorus: bool = False) -> dict:
     """Full pipeline. set_status(stage, progress) reports to the job store.
 
     Returns {"title": ..., "karaoke": path, "vocals": path, "original": path}.
@@ -111,6 +168,10 @@ def run_pipeline(url: str, job_dir: Path, set_status) -> dict:
     encode_mp3(karaoke_wav, karaoke_mp3)
     encode_mp3(vocals_wav, vocals_mp3)
     encode_mp3(audio, original_mp3)
+    if keep_chorus:
+        set_status("separating_chorus", 0.0)
+        make_chorus_karaoke(audio, job_dir, job_dir / "karaoke_chorus.mp3",
+                            lambda p: set_status("separating_chorus", p))
 
     # Drop the big intermediates; keep only the mp3s.
     shutil.rmtree(job_dir / "stems", ignore_errors=True)

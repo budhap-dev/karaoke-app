@@ -46,7 +46,7 @@ The first job you run will also download the Demucs model weights (~80 MB, cache
 
 Then open **http://127.0.0.1:8000** in your browser:
 
-1. Paste a YouTube link and click **Make karaoke**.
+1. Paste a YouTube link and click **Make karaoke**. Optionally tick **Keep backing/chorus vocals** to also get a karaoke variant that keeps harmonies (see note below).
 2. Watch the progress — downloading → separating (takes a few minutes) → encoding.
 3. Play all three tracks in the browser or download them (file sizes shown on the links).
 
@@ -58,11 +58,12 @@ The web UI uses a small JSON API you can also call directly:
 
 | Method | Path | Description |
 |---|---|---|
-| `POST` | `/api/jobs` | Start a job. Body: `{"url": "https://..."}`. Returns `{"id": "..."}` |
+| `POST` | `/api/jobs` | Start a job. Body: `{"url": "https://...", "keep_chorus": false}`. Returns `{"id": "..."}` |
 | `GET` | `/api/jobs/{id}` | Job status: `stage` (`queued` / `downloading` / `separating` / `encoding` / `done` / `error`), `progress` (0–1 or null), `title`, `error`, and `sizes` (bytes per track, when done) |
 | `GET` | `/api/jobs/{id}/karaoke.mp3` | Instrumental track |
 | `GET` | `/api/jobs/{id}/vocals.mp3` | Vocals-only track |
 | `GET` | `/api/jobs/{id}/original.mp3` | Original song |
+| `GET` | `/api/jobs/{id}/karaoke_chorus.mp3` | Karaoke keeping backing vocals (only when requested) |
 
 Example:
 
@@ -94,4 +95,5 @@ data/jobs/     Output MP3s, one folder per job (gitignored)
 - **A job failed?** The `error` field in the job status includes the last lines of the failing tool's output.
 - **`HTTP Error 403: Forbidden` (or other YouTube download errors)?** YouTube changes its site frequently and yt-dlp must keep up — upgrade it and restart the server: `.venv/bin/pip install -U yt-dlp`. Expect to do this every few weeks.
 - **`address already in use` on startup?** Another process (often a previous server instance) is holding port 8000. Free it with `kill $(lsof -ti :8000)`, or run on a different port: `.venv/bin/uvicorn backend.app:app --port 8001`.
+- **"Keep backing/chorus vocals"** runs a second, dedicated separation model (UVR MDX-Net Karaoke via [audio-separator](https://github.com/nomadkaraoke/python-audio-separator)) that removes *only the lead vocal*, keeping harmonies and choir. It adds ~30 s per song and downloads its model (~50 MB, cached in `~/.cache/audio-separator`) on first use. Compare it with the plain karaoke track and use whichever sounds better.
 - **Separation quality**: `htdemucs` is good but not perfect — expect slight vocal bleed on dense mixes. The quality ceiling is the YouTube source audio (~130–160 kbps Opus), not the 320 kbps MP3 encode.
